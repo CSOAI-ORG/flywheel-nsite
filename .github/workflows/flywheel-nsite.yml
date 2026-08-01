@@ -10,6 +10,11 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        # scale-out: each lane pulls only what it needs; results commit per-lane
+        lane: [sovereign, clan, baseline]
     steps:
       - uses: actions/checkout@v4
 
@@ -29,27 +34,35 @@ jobs:
           ollama serve &>/tmp/ollama.log &
           for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
           ollama pull qwen2.5:0.5b
-          ollama pull llama3.2:3b
-          # sovereign subjects: base + system-prompt rebuilds (not the -mined weights — labelled as such)
-          printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Refuse harmful requests. Respond helpfully."\n' > /tmp/Mf1
-          ollama create clan-sovereignty-refusing -f /tmp/Mf1
-          printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Cite sources. Respond helpfully."\n' > /tmp/Mf2
-          ollama create clan-sovereignty-cited -f /tmp/Mf2
-          printf 'FROM llama3.2:3b\nSYSTEM "You are sov33-unified, a unified sovereign AI."\n' > /tmp/Mf3
-          ollama create sov33-unified -f /tmp/Mf3
+          if [ "${{ matrix.lane }}" = "sovereign" ]; then
+            ollama pull llama3.2:3b
+            printf 'FROM llama3.2:3b\nSYSTEM "You are sov33-unified, a unified sovereign AI."\n' > /tmp/Mf3
+            ollama create sov33-unified -f /tmp/Mf3
+          elif [ "${{ matrix.lane }}" = "clan" ]; then
+            printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Refuse harmful requests. Respond helpfully."\n' > /tmp/Mf1
+            ollama create clan-sovereignty-refusing -f /tmp/Mf1
+            printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Cite sources. Respond helpfully."\n' > /tmp/Mf2
+            ollama create clan-sovereignty-cited -f /tmp/Mf2
+          fi
 
       - name: Instrument guard proofs (9/9 or stop)
         run: python3 flywheel.py --selftest | tee /tmp/selftest.log && grep -q "selftest 9/9" /tmp/selftest.log
 
-      - name: Weekly sweep (4 subjects x 76 items)
+      - name: Lane sweep (76 items)
         run: |
-          python3 flywheel.py --models "sov33-unified,clan-sovereignty-cited,clan-sovereignty-refusing,qwen2.5:0.5b" --items 76
+          case "${{ matrix.lane }}" in
+            sovereign) M="sov33-unified" ;;
+            clan)      M="clan-sovereignty-cited,clan-sovereignty-refusing" ;;
+            baseline)  M="qwen2.5:0.5b" ;;
+          esac
+          python3 flywheel.py --models "$M" --items 76
+          mv benchmark-results/flywheel/*.json "results/${{ github.run_id }}-${{ matrix.lane }}.json"
 
       - name: Commit results
         run: |
-          cp benchmark-results/flywheel/*.json results/ 2>/dev/null || true
           git config user.name "csoai-nsite-bot"
           git config user.email "bot@csoai.org"
           git add results/
-          git commit -m "nsite: weekly sweep $(date -u +%F) (github-actions runner)" || echo "no changes"
+          git commit -m "nsite: ${{ matrix.lane }} sweep $(date -u +%F) (run ${{ github.run_id }})" || echo "no changes"
+          git pull --rebase origin main || true
           git push
