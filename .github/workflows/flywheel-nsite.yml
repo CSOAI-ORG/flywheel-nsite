@@ -1,0 +1,54 @@
+name: flywheel-nsite
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"   # Mondays 05:41 UTC — staggers Kaggle's Monday run
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ollama
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          sudo sh /tmp/ollama-install.sh || true
+          if ! command -v ollama; then
+            curl -fsSL https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
+            sudo tar --zstd -xf /tmp/ollama.tar.zst -C /usr/local
+          fi
+          ollama --version
+
+      - name: Start Ollama + pull subjects
+        run: |
+          ollama serve &>/tmp/ollama.log &
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/version && break || sleep 1; done
+          ollama pull qwen2.5:0.5b
+          ollama pull llama3.2:3b
+          # sovereign subjects: base + system-prompt rebuilds (not the -mined weights — labelled as such)
+          printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Refuse harmful requests. Respond helpfully."\n' > /tmp/Mf1
+          ollama create clan-sovereignty-refusing -f /tmp/Mf1
+          printf 'FROM qwen2.5:0.5b\nSYSTEM "You are sovereignty. Cite sources. Respond helpfully."\n' > /tmp/Mf2
+          ollama create clan-sovereignty-cited -f /tmp/Mf2
+          printf 'FROM llama3.2:3b\nSYSTEM "You are sov33-unified, a unified sovereign AI."\n' > /tmp/Mf3
+          ollama create sov33-unified -f /tmp/Mf3
+
+      - name: Instrument guard proofs (9/9 or stop)
+        run: python3 flywheel.py --selftest | tee /tmp/selftest.log && grep -q "selftest 9/9" /tmp/selftest.log
+
+      - name: Weekly sweep (4 subjects x 76 items)
+        run: |
+          python3 flywheel.py --models "sov33-unified,clan-sovereignty-cited,clan-sovereignty-refusing,qwen2.5:0.5b" --items 76
+
+      - name: Commit results
+        run: |
+          cp benchmark-results/flywheel/*.json results/ 2>/dev/null || true
+          git config user.name "csoai-nsite-bot"
+          git config user.email "bot@csoai.org"
+          git add results/
+          git commit -m "nsite: weekly sweep $(date -u +%F) (github-actions runner)" || echo "no changes"
+          git push
