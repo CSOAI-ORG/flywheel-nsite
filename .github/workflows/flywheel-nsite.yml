@@ -58,6 +58,7 @@ jobs:
             baseline)  M="qwen2.5:0.5b" ;;
           esac
           python3 flywheel.py --models "$M" --items 76
+          mkdir -p results
           mv benchmark-results/flywheel/*.json "results/${{ github.run_id }}-${{ matrix.lane }}.json"
 
       - name: Commit results
