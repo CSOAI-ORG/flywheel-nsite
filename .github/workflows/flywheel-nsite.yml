@@ -10,6 +10,8 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
