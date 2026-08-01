@@ -2,7 +2,8 @@ name: flywheel-nsite
 
 on:
   schedule:
-    - cron: "41 5 * * 1"   # Mondays 05:41 UTC — staggers Kaggle's Monday run
+    - cron: "33 3 * * *"   # DAILY overnight 03:33 UTC — the N-site never sleeps
+    - cron: "41 5 * * 1"   # + Monday flagship slot
   workflow_dispatch:
 
 jobs:
